@@ -1,0 +1,30 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "g++ - Build and debug active file",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${fileDirname}/prog_poll",  // 被执行的文件
+            // "program": "${workspaceFolder}/build/main_cmake",
+            "args": [],  // 执行的时候附加的参数
+            "stopAtEntry": false,  // 是否在进入调试状态后的第一句语句暂停
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "C/C++: g++ build active file",  // 在调试开始之前执行的命令
+            "miDebuggerPath": "/usr/bin/gdb"
+        }
+    ]
+}

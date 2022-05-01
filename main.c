@@ -27,28 +27,35 @@
 ef_runtime_t efr = {0};
 
 #define BUFFER_SIZE 8192
+#define PORT_LISTEN 39100
+#define PORT_REDIRECT 39200
 
 // for performance test
-// forward port 8080 <=> 80, HTTP GET only
-// let a http server run at localhost:80
+// forward port PORT_LISTEN <=> PORT_REDIRECT, HTTP GET only
+// let a http server run at localhost:PORT_REDIRECT
 // use HTTP/1.0 or set http header 'Connection: Close'
+// 将PORT_LISTEN端口接收到的GET请求转发到PORT_REDIRECT端口
 long forward_proc(int fd, ef_routine_t *er)
 {
     char buffer[BUFFER_SIZE];
+    // 读请求，理论上对于GET一次read应该就可以
     ssize_t r = ef_routine_read(er, fd, buffer, BUFFER_SIZE);
     if(r <= 0)
     {
         return r;
     }
+    // 建立到PORT_REDIRECT端口的连接
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in addr_in = {0};
     addr_in.sin_family = AF_INET;
-    addr_in.sin_port = htons(80);
+    addr_in.sin_port = htons(PORT_REDIRECT);
     int ret = ef_routine_connect(er, sockfd, (const struct sockaddr *)&addr_in, sizeof(addr_in));
     if(ret < 0)
     {
         return ret;
     }
+
+    // 将读取到的请求体发送到PORT_REDIRECT端口
     ssize_t w = ef_routine_write(er, sockfd, buffer, r);
     if(w < 0)
     {
@@ -56,12 +63,15 @@ long forward_proc(int fd, ef_routine_t *er)
     }
     while(1)
     {
+        // 从PORT_REDIRECT端口循环读取响应数据
         r = ef_routine_read(er, sockfd, buffer, BUFFER_SIZE);
         if(r <= 0)
         {
             break;
         }
         ssize_t wrt = 0;
+
+        // 将响应数据写给请求方，循环确保完全写入
         while(wrt < r)
         {
             w = ef_routine_write(er, fd, &buffer[wrt], r - wrt);
@@ -107,6 +117,9 @@ void signal_handler(int num)
 
 int main(int argc, char *argv[])
 {
+    // 1. 初始化框架
+    // 协程池初始化，需要指定协程池规模，协程栈大小
+    // IO多路复用初始化
     if (ef_init(&efr, 64 * 1024, 256, 512, 1000 * 60, 16) < 0) {
         return -1;
     }
@@ -116,6 +129,8 @@ int main(int argc, char *argv[])
     sigaction(SIGHUP, &sa, NULL);
     sigaction(SIGINT, &sa, NULL);
 
+    // 2. 创建监听socket
+    // 监听PORT_LISTEN端口
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if(sockfd < 0)
     {
@@ -123,13 +138,18 @@ int main(int argc, char *argv[])
     }
     struct sockaddr_in addr_in = {0};
     addr_in.sin_family = AF_INET;
-    addr_in.sin_port = htons(8080);
+    addr_in.sin_port = htons(PORT_LISTEN);
     int retval = bind(sockfd, (const struct sockaddr *)&addr_in, sizeof(addr_in));
     if(retval < 0)
     {
         return -1;
     }
     listen(sockfd, 512);
+
+    // 把socket加入监听socket链表
+    // 框架支持多个监听socket分别监听不同端口，所以先放入链表，框架运行起来后会一并处理
+    // 需要指定业务处理入口，此处为forward_proc
+    // 新建立的连接会交给一个协程，forward_proc便是这些协程的执行入口
     ef_add_listen(&efr, sockfd, forward_proc);
 
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -137,7 +157,7 @@ int main(int argc, char *argv[])
     {
         return -1;
     }
-    addr_in.sin_port = htons(80);
+    addr_in.sin_port = htons(PORT_REDIRECT);
     retval = bind(sockfd, (const struct sockaddr *)&addr_in, sizeof(addr_in));
     if(retval < 0)
     {
@@ -146,5 +166,6 @@ int main(int argc, char *argv[])
     listen(sockfd, 512);
     ef_add_listen(&efr, sockfd, greeting_proc);
 
+    // 3. 运行框架，开启IO多路复用事件循环
     return ef_run_loop(&efr);
 }
